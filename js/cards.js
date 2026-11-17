@@ -237,8 +237,12 @@
    * ================================================================= */
   var cardState = { panel: null, panelDrug: null, favGroup: null, drug: '', page: 0, continuous: null };
 
+  // 「上一个/下一个」只在 443 味主药之间走；附药只能从主药卡里的「附药」入口打开
   function visibleOrder() {
-    return Z.order.filter(function (id) { return !Z.isHidden(id) && Z.byId[id]; });
+    return Z.order.filter(function (id) {
+      var d = Z.byId[id];
+      return d && d.kind === 'main' && !Z.isHidden(id);
+    });
   }
 
   function cardHTML(v) {
@@ -303,7 +307,35 @@
   }
 
   /* 长卡片分页：药性/功效 → 应用（每页 3 条）→ 用法/注意 */
+  /* 估算「一屏能放多少字」，用来判断卡片是否需要分页（不同屏幕宽度/高度自适应） */
+  function screenChars() {
+    var w = Math.min(window.innerWidth || 390, 760) - 60;                 // 卡片内可用宽度
+    var cpl = Math.max(13, Math.floor(w / 15.5));                          // 每行汉字数
+    var lps = Math.max(12, Math.floor(((window.innerHeight || 800) - 170) / 28.7)); // 每屏行数
+    return cpl * lps;
+  }
+
+  function pageLabel(units) {
+    var hasApp = false, hasBasic = false, hasOther = false;
+    units.forEach(function (u) {
+      if (u.k === 'app' || u.k === 'tail') hasApp = true;
+      else if (u.k === 'basic') hasBasic = true;
+      else hasOther = true;
+    });
+    if (hasBasic && !hasApp && !hasOther) return '药性 · 功效';
+    if (hasApp) return '应用';
+    if (hasOther) return '用法 · 注意';
+    return '';
+  }
+
+  /* 卡片内容：默认整卡一页；只有明显超过 2 屏才按长度均衡分页 */
   function buildContent(v) {
+    if (v.kind === 'attach' && v.raw) {
+      return {
+        paged: false,
+        html: sec('附药原文', '<div class="sec-body" style="font-size:15px;line-height:1.95;text-align:justify">' + esc(v.raw) + '</div>')
+      };
+    }
     var basic = '';
     if (v.nature) basic += sec('药性', '<div class="sec-body">' + esc(v.nature) + '</div>');
     if (v.effects && v.effects.length) {
@@ -313,46 +345,45 @@
     }
     var usage = v.usage ? sec('用法用量', '<div class="sec-body">' + esc(v.usage) + '</div>') : '';
     var caution = v.caution ? sec('使用注意', '<div class="sec-body" style="color:#8a3b3b">' + esc(v.caution) + '</div>') : '';
-    if (v.kind === 'attach' && v.raw) {
-      var rawOnly = sec('附药原文', '<div class="sec-body" style="font-size:15px;line-height:1.95;text-align:justify">' + esc(v.raw) + '</div>');
-      var cl = (v.raw || '').length;
-      if (cl > 700) {
-        // 极长附药也可以分两页，暂无必要，保持整段
-      }
-      return { paged: false, html: rawOnly };
-    }
     var apps = v.apps || [];
     var tail = (v.appsTail || []).map(function (t) {
       return '<div class="app-tail">' + esc(t).replace(/\n/g, '<br>') + '</div>';
     }).join('');
-    var appsBlock = '';
-    if (apps.length || tail) {
-      appsBlock = sec('应用', apps.map(appItem).join('') + tail);
-    }
-    // 连续阅读的整体 HTML
+    var appsInner = apps.map(appItem).join('') + tail;
+    var appsBlock = appsInner ? sec('应用', appsInner) : '';
     var full = basic + appsBlock + usage + caution;
 
-    // 是否分页：应用条目多，或正文很长
+    var per = screenChars();
     var len = (v.nature || '').length + (v.effectsRaw || '').length + (v.usage || '').length + (v.caution || '').length;
     apps.forEach(function (a) { len += (a.t || '').length + (a.d || '').length; });
-    var needPage = apps.length >= 4 || len > 700;
-    if (!needPage) return { paged: false, html: full };
+    len += (v.appsTail || []).join('').length;
 
-    var pages = [];
-    pages.push({ label: '药性 · 功效', html: basic || '<div class="empty">（原文无分项）</div>' });
-    var size = 3;
-    for (var i = 0; i < apps.length; i += size) {
-      var part = apps.slice(i, i + size).map(function (a, k) { return appItem(a, i + k); });
-      var isLast = (i + size >= apps.length);
-      if (isLast) part.push(tail);
-      pages.push({
-        label: '应用 ' + (i + 1) + '–' + Math.min(i + size, apps.length) + ' / ' + apps.length,
-        html: sec('应用', part.join(''))
-      });
-    }
-    if (!apps.length && tail) pages.push({ label: '应用', html: sec('应用', tail) });
-    if (usage || caution) pages.push({ label: '用法 · 注意', html: usage + caution });
-    return { paged: pages.length > 1, pages: pages, html: full };
+    if (per <= 0 || len <= per * 2) return { paged: false, html: full };
+
+    // 组装成内容单元（不把一条应用拆开），再按长度均衡装箱
+    var units = [];
+    if (basic) units.push({ k: 'basic', html: basic, len: (v.nature || '').length + (v.effectsRaw || '').length + 26 });
+    apps.forEach(function (a, i) {
+      units.push({ k: 'app', html: appItem(a, i), len: (a.t || '').length + (a.d || '').length + 8 });
+    });
+    if (tail) units.push({ k: 'tail', html: tail, len: (v.appsTail || []).join('').length + 6 });
+    if (usage) units.push({ k: 'other', html: usage, len: (v.usage || '').length + 10 });
+    if (caution) units.push({ k: 'other', html: caution, len: (v.caution || '').length + 10 });
+
+    var pageCount = Math.min(4, Math.max(2, Math.ceil(len / (per * 1.45))));
+    var target = len / pageCount;
+    var pages = [], cur = null;
+    units.forEach(function (u) {
+      if (cur && cur.len > 0 && pages.length < pageCount - 1 && cur.len + u.len > target * 1.15) {
+        pages.push(cur); cur = null;
+      }
+      if (!cur) cur = { units: [], html: '', len: 0 };
+      cur.units.push(u); cur.html += u.html; cur.len += u.len;
+    });
+    if (cur && cur.html) pages.push(cur);
+    if (pages.length < 2) return { paged: false, html: full };
+    pages.forEach(function (pg) { pg.label = pageLabel(pg.units); });
+    return { paged: true, pages: pages, html: full };
   }
 
   function cpagerHTML(page, total, label) {
@@ -397,6 +428,8 @@
         { icon: 'list', label: '目录', onClick: function () { UI.go('#/catalog'); } }
       ]
     });
+    var hb = document.getElementById('hd-back');
+    if (hb) hb.onclick = function () { UI.replace('#/catalog'); };
 
     main.innerHTML = cardHTML(v) +
       '<div class="act-row" id="card-acts">' +
@@ -409,7 +442,7 @@
       '<div id="card-panel"></div>' +
       '<div class="pager">' +
       '<button class="btn" id="p-prev"' + (prevId ? '' : ' disabled') + '>' + icon('left') + ' 上一个</button>' +
-      '<div class="pc">' + (idx >= 0 ? (idx + 1) + ' / ' + list.length : '已隐藏') + '</div>' +
+      '<div class="pc">' + (idx >= 0 ? (idx + 1) + ' / ' + list.length : (d.kind === 'attach' ? '附药' : '已隐藏')) + '</div>' +
       '<button class="btn" id="p-next"' + (nextId ? '' : ' disabled') + '>下一个 ' + icon('right') + '</button>' +
       '</div>' +
       '<div class="small dim center" style="margin-top:14px">目录顺序 · 已隐藏的药会被跳过</div>';

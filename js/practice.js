@@ -63,40 +63,47 @@
       sub: '默写 · 选择题',
       actions: [{ icon: 'list', label: '目录', onClick: function () { UI.go('#/catalog'); } }]
     });
-    var drafts = Z.store.draft || {};
+    var drafts = (Z.store.drafts || []).slice().sort(function (a, b) {
+      return (b.createdAt || b.ts || 0) - (a.createdAt || a.ts || 0);
+    });
     var h = [];
-    h.push('<div class="card" style="padding:12px 14px;background:#fbf4e2;border-color:#ecd9ae">' +
-      '<div class="small" style="color:#7a5c15;line-height:1.7">练习不记成绩，只帮你把药背下来。中途退出会自动保存已作答的内容，下次接着练。</div></div>');
+    h.push('<div class="card" style="padding:12px 14px;background:#f0f7ef;border-color:#cfe3d2">' +
+      '<div class="small" style="color:#2b6b43;line-height:1.7">练习不记成绩，只帮你把药背下来。中途退出会自动保存，可同时保留多份练习记录（最多 5 份），随时接着练。</div></div>');
     h.push('<div class="grid2">' +
       tile('mo', '默写练习', '看药名，默写药性 / 功效 / 应用') +
       tile('tc', '选择题练习', '按比例生成选项，选出正确内容') +
       '</div>');
-    ['mo', 'tc'].forEach(function (m) {
-      var d = drafts[m];
-      if (!d) return;
-      var total = m === 'mo' ? d.order.length : d.order.length * d.fields.length;
-      var done = m === 'mo' ? Object.keys(d.submitted || {}).length : (d.i || 0);
-      h.push('<div class="card mt10" style="padding:11px 13px;border-color:#d8c8a8">' +
-        '<div class="row between"><div><div class="b small">' + (m === 'mo' ? '默写' : '选择题') + '练习未完成</div>' +
-        '<div class="tiny dim mt6">已答 ' + done + ' / ' + total + ' 题 · ' + Z.nowText(d.ts) + '</div></div>' +
-        '<div class="row"><button class="btn xs" data-rdel="' + m + '">丢弃</button>' +
-        '<button class="btn xs primary" data-resume="' + m + '">继续</button></div></div></div>');
-    });
+    if (drafts.length) {
+      h.push('<div class="card mt10" style="padding:12px 13px 4px"><div class="sec-label">未完成的练习（' + drafts.length + '）</div>');
+      drafts.forEach(function (rec) {
+        var total = Z.practiceTotal(rec);
+        var done = Z.practiceDone(rec);
+        h.push('<div class="li" style="padding:10px 0;border-bottom:1px solid var(--line)">' +
+          '<div class="li-t"><div class="t">' + (rec.mode === 'mo' ? '默写练习' : '选择题练习') + '</div>' +
+          '<div class="s">已答 ' + done + ' / ' + total + ' 题 · ' + Z.nowText(rec.ts || rec.createdAt) + '</div></div>' +
+          '<button class="btn xs" data-rdel="' + rec.id + '">丢弃</button>' +
+          '<button class="btn xs primary" data-resume="' + rec.id + '">继续</button></div>');
+      });
+      h.push('</div>');
+    }
     h.push('<div class="card mt10"><div class="sec-label">练习范围说明</div>' +
-      '<div class="small muted">范围可以精确到每一味药，也可以整章/整节勾选；内容可选药性、功效、应用。</div></div>');
+      '<div class="small muted">范围可以精确到每一味药，也可以整章/整节勾选；内容可选药性、功效、应用。默认<b>不预选</b>，自己勾选后开始。</div></div>');
     main.innerHTML = h.join('');
     UI.bind(main, '[data-mode]', function (el) { UI.go('#/practice/setup?mode=' + el.getAttribute('data-mode')); });
     UI.bind(main, '[data-resume]', function (el) {
-      var m = el.getAttribute('data-resume');
-      run = Z.store.draft[m];
-      if (!run) { UI.toast('草稿不存在'); return; }
-      UI.go('#/practice/run?mode=' + m);
+      var id = el.getAttribute('data-resume');
+      var rec = (Z.store.drafts || []).filter(function (x) { return x.id === id; })[0];
+      if (!rec) { UI.toast('记录不存在'); return; }
+      run = rec;
+      UI.go('#/practice/run?id=' + id);
     });
     UI.bind(main, '[data-rdel]', function (el) {
-      var m = el.getAttribute('data-rdel');
-      UI.confirmDialog('丢弃进度', '将清空这次未完成的练习记录，确定吗？', '丢弃', '取消').then(function (ok) {
+      var id = el.getAttribute('data-rdel');
+      UI.confirmDialog('丢弃练习', '将删除这份未完成的练习记录，确定吗？', '丢弃', '取消').then(function (ok) {
         if (!ok) return;
-        Z.store.draft[m] = null; Z.save(true);
+        Z.store.drafts = (Z.store.drafts || []).filter(function (x) { return x.id !== id; });
+        if (run && run.id === id) run = null;
+        Z.save(true);
         UI.toast('已丢弃'); renderHome(main);
       });
     });
@@ -109,7 +116,7 @@
   /* ---------------- 练习设置 ---------------- */
   function renderSetup(main, p, q) {
     st.mode = (q.mode === 'tc') ? 'tc' : 'mo';
-    if (!Object.keys(st.sel).length) selectAll(true);
+    // 默认不预选：由用户自己勾选范围（「清空」也才能真正清空）
     UI.header({ title: '练习设置', sub: st.mode === 'tc' ? '选择题' : '默写', back: true });
 
     var h = [];
@@ -289,14 +296,18 @@
     var ids = drugs.map(function (d) { return d.id; });
     var orderArr = ids.slice();
     if (st.order === 'random') orderArr = Z.shuffle(orderArr);
-    if (mode === 'mo') {
-      run = { mode: 'mo', fields: fields, order: orderArr, i: 0, ans: {}, submitted: {}, ts: Date.now() };
-    } else {
-      run = { mode: 'tc', fields: fields, order: orderArr, i: 0, qs: [], ts: Date.now() };
-    }
-    Z.store.draft[mode] = run;
+    var rec = {
+      id: 'dr_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+      mode: mode, fields: fields, order: orderArr, i: 0,
+      ans: {}, submitted: {}, qs: [],
+      ts: Date.now(), createdAt: Date.now()
+    };
+    if (!Array.isArray(Z.store.drafts)) Z.store.drafts = [];
+    Z.store.drafts.unshift(rec);
+    if (Z.store.drafts.length > 5) Z.store.drafts.length = 5;   // 最多保留 5 份，防止占满本地存储
     Z.save(true);
-    UI.go('#/practice/run?mode=' + mode);
+    run = rec;
+    UI.go('#/practice/run?id=' + rec.id);
   }
 
   /* ---------------- 选择题生成 ---------------- */
@@ -365,17 +376,27 @@
   /* ---------------- 运行页 ---------------- */
   var guardBusy = false;
   function renderRun(main, p, q) {
-    var mode = (q.mode === 'tc') ? 'tc' : 'mo';
-    if (!run || run.mode !== mode) {
-      run = Z.store.draft[mode];
-      if (!run) { UI.toast('没有进行中的练习'); UI.go('#/practice'); return; }
+    var id = q.id || '';
+    if (!run || run.id !== id) {
+      var list = Z.store.drafts || [];
+      var rec = id ? list.filter(function (x) { return x.id === id; })[0] : null;
+      if (!rec && q.mode) {
+        rec = list.filter(function (x) { return x.mode === q.mode; })
+          .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); })[0];
+      }
+      if (!rec) { UI.toast('没有进行中的练习'); UI.go('#/practice'); return; }
+      run = rec;
     }
+    var mode = run.mode;
     UI.header({
       title: mode === 'mo' ? '默写练习' : '选择题练习',
       sub: '自动保存',
       back: true,
       actions: [{ text: '结束', label: '结束练习', onClick: function () { requestExit(); } }]
     });
+    // 顶部返回 = 结束流程（直接回练习入口页，不再 history.back 绕回上一题）
+    var hb = document.getElementById('hd-back');
+    if (hb) hb.onclick = function () { requestExit(); };
     if (mode === 'mo') renderMoRun(main); else renderTcRun(main);
     installGuard(main);
   }
@@ -383,13 +404,15 @@
   function saveRun() {
     if (!run) return;
     run.ts = Date.now();
-    Z.store.draft[run.mode] = run;
+    if (!Array.isArray(Z.store.drafts)) Z.store.drafts = [];
+    var i = -1;
+    Z.store.drafts.forEach(function (x, k) { if (x.id === run.id) i = k; });
+    if (i >= 0) Z.store.drafts[i] = run; else Z.store.drafts.unshift(run);
     Z.save(true);
   }
 
   function totalCount() {
-    if (!run) return 0;
-    return run.mode === 'mo' ? run.order.length : run.order.length * run.fields.length;
+    return Z.practiceTotal(run);
   }
 
   function progressHTML(done, total) {
@@ -571,7 +594,7 @@
   function requestExit() {
     if (!run) { UI.go('#/practice'); return; }
     var total = totalCount();
-    var done = run.mode === 'mo' ? Object.keys(run.submitted).length : run.i;
+    var done = Z.practiceDone(run);
     saveRun();
     UI.dialog({
       title: '结束练习？',
@@ -584,21 +607,21 @@
       if (!ok) return;
       saveRun();
       run = null;
-      UI.go('#/practice');
+      location.replace('#/practice');
     });
   }
 
   function finishPractice() {
-    var m = run ? run.mode : 'mo';
-    Z.store.draft[m] = null;
+    if (!run) { location.replace('#/practice'); return; }
+    var id = run.id;
+    Z.store.drafts = (Z.store.drafts || []).filter(function (x) { return x.id !== id; });
     Z.save(true);
-    Z.store.draft[m] = null;
     run = null;
     UI.dialog({
       title: '练习完成',
       text: '本次练习已全部过完。继续保持～',
       buttons: [{ text: '返回练习页', value: true, primary: true }]
-    }).then(function () { UI.go('#/practice'); });
+    }).then(function () { location.replace('#/practice'); });
   }
 
   /* ---------------- 离开守卫（返回键 / 切换底栏） ---------------- */
@@ -615,7 +638,7 @@
       if (!href || href.indexOf('#/practice/run') === 0) return;
       e.preventDefault();
       e.stopPropagation();
-      confirmLeave(function () { location.hash = href; });
+      confirmLeave(function () { location.replace(href); });
     }, true);
     window.addEventListener('beforeunload', function () { saveRun(); });
   }
@@ -638,12 +661,12 @@
     });
   }
 
-  /* 路由守卫：返回键 / 直接改 hash 时先问一句 */
+  /* 路由守卫：练习中要离开时统一走「结束并保存」流程，不再来回改 hash 造成循环 */
   function beforeRoute(h) {
     if (!run) return true;
-    if ((h || '').indexOf('#/practice/run') === 0) return true;
-    try { history.replaceState(null, '', '#/practice/run?mode=' + run.mode); } catch (e) { }
-    confirmLeave(function () { location.hash = h; });
+    if (h === '#/practice/run?id=' + run.id) return true;
+    try { history.replaceState(null, '', '#/practice/run?id=' + run.id); } catch (e) { }
+    requestExit();
     return false;
   }
 
@@ -656,8 +679,9 @@
   };
   window.appBack = function () {
     if (UI.dialogOpen()) { UI.closeDialog(false); return true; }
-    if (run) { confirmLeave(function () { UI.go('#/practice'); }); return true; }
+    if (run) { requestExit(); return true; }
     var h = location.hash || '#/home';
+    if (h.indexOf('#/card/') === 0) { UI.replace('#/catalog'); return true; }
     var roots = ['#/home', '#/catalog', '#/practice', '#/fav', '#/me', ''];
     if (roots.indexOf(h) >= 0) return false;
     history.back();
@@ -665,8 +689,14 @@
   };
 
   UI.VIEWS.practice = function (main, p) {
-    if (p[0] === 'setup') return renderSetup(main, p, UI.parseHash().q);
-    if (p[0] === 'run') return renderRun(main, p, UI.parseHash().q);
+    var q = UI.parseHash().q;
+    if (p[0] === 'setup') {
+      // 每次从其它页面进入设置页都从空白开始（页面内勾选/重渲染不会清空）
+      if (st.entered !== true) { st.sel = {}; st.entered = true; }
+      return renderSetup(main, p, q);
+    }
+    st.entered = false;
+    if (p[0] === 'run') return renderRun(main, p, q);
     return renderHome(main);
   };
 })();

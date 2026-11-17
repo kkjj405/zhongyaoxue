@@ -28,7 +28,7 @@
     edits: {},          // drugId -> {nature, effects, apps, appsTail, usage, caution, raw}
     fav: { groups: [{ id: 'g0', name: '默认分组' }], items: {} },  // items: drugId -> groupId
     pos: { lastDrug: '' },
-    draft: { mo: null, tc: null },
+    drafts: [],            // 可同时保留多份未完成练习（旧版单条 draft 会自动迁移）
     settings: { order: 'random', includeAttach: true },
     meta: { firstOpen: 0, lastVersion: '' }
   };
@@ -47,6 +47,18 @@
         o.fav = { groups: [{ id: 'g0', name: '默认分组' }], items: {} };
       }
       if (!o.fav.items) o.fav.items = {};
+      // 旧版只有一条 draft:{mo,tc}，迁移成数组
+      if (!Array.isArray(o.drafts)) o.drafts = [];
+      if (o.draft) {
+        ['mo', 'tc'].forEach(function (k) {
+          var d = o.draft[k];
+          if (!d) return;
+          if (!d.id) d.id = 'dr_' + (d.ts || Date.now()) + '_' + k;
+          if (!d.createdAt) d.createdAt = d.ts || Date.now();
+          o.drafts.push(d);
+        });
+        delete o.draft;
+      }
       return o;
     } catch (e) {
       return JSON.parse(JSON.stringify(DEFAULT));
@@ -117,6 +129,16 @@
     var seen = Object.create(null), out = [];
     arr.forEach(function (x) { var k = fn(x); if (!seen[k]) { seen[k] = 1; out.push(x); } });
     return out;
+  }
+  function practiceTotal(rec) {
+    if (!rec) return 0;
+    if (rec.mode === 'mo') return rec.order.length;
+    return rec.order.length * rec.fields.length;
+  }
+  function practiceDone(rec) {
+    if (!rec) return 0;
+    if (rec.mode === 'mo') return Object.keys(rec.submitted || {}).length;
+    return (rec.qs || []).filter(function (q) { return q.done; }).length;
   }
   function nowText(ts) {
     var d = new Date(ts || Date.now());
@@ -235,6 +257,7 @@
     store: store, save: save, persist: persist,
     esc: esc, splitList: splitList, parseApps: parseApps, appsToText: appsToText,
     shuffle: shuffle, sample: sample, uniqBy: uniqBy, nowText: nowText,
+    practiceTotal: practiceTotal, practiceDone: practiceDone,
     view: view, hasEdit: hasEdit,
     isFav: isFav, favGroup: favGroup, toggleFav: toggleFav, favList: favList,
     isHidden: isHidden, setHidden: setHidden, hiddenCount: hiddenCount,

@@ -449,7 +449,7 @@
     return {
       app: 'zyx', version: VER.app, ts: Date.now(),
       notes: Z.store.notes, fav: Z.store.fav, hidden: Z.store.hidden,
-      edits: Z.store.edits, draft: Z.store.draft, settings: Z.store.settings
+      edits: Z.store.edits, drafts: Z.store.drafts, settings: Z.store.settings
     };
   }
   function doExport() {
@@ -475,9 +475,20 @@
       if (!o || o.app !== 'zyx') { UI.toast('这不是本程序的备份文件'); return; }
       UI.confirmDialog('导入备份', '导入会覆盖当前本机的笔记/收藏/修改/隐藏/练习进度，确定？', '导入', '取消').then(function (ok) {
         if (!ok) return;
-        ['notes', 'fav', 'hidden', 'edits', 'draft', 'settings'].forEach(function (k) {
+        ['notes', 'fav', 'hidden', 'edits', 'drafts', 'settings'].forEach(function (k) {
           if (o[k] != null) Z.store[k] = o[k];
         });
+        // 兼容旧版备份（单条 draft:{mo,tc}）
+        if (o.draft) {
+          ['mo', 'tc'].forEach(function (k) {
+            var d = o.draft[k];
+            if (!d) return;
+            d.id = d.id || ('dr_' + (d.ts || Date.now()) + '_' + k);
+            d.createdAt = d.createdAt || d.ts || Date.now();
+            if (!Array.isArray(Z.store.drafts)) Z.store.drafts = [];
+            Z.store.drafts.push(d);
+          });
+        }
         Z.save(true);
         UI.toast('导入完成');
         location.reload();

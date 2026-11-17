@@ -122,6 +122,9 @@
     if (location.hash === hash) { render(); return; }
     location.hash = hash;
   }
+  function replace(hash) {
+    try { location.replace(hash); } catch (e) { location.hash = hash; }
+  }
   function back() {
     if (location.hash && location.hash !== '#/home') history.back();
     else go('#/home');
@@ -192,7 +195,7 @@
 
   window.ZY_UI = {
     ICONS: ICONS, icon: icon, TABS: TABS, VIEWS: VIEWS, state: state,
-    header: header, tabbar: tabbar, render: render, go: go, back: back,
+    header: header, tabbar: tabbar, render: render, go: go, back: back, replace: replace,
     dialog: dialog, closeDialog: closeDialog, confirmDialog: confirmDialog, dialogOpen: dialogOpen,
     toast: toast, emptyBox: emptyBox, bind: bind, parseHash: parseHash
   };

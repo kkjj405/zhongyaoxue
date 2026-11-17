@@ -7,8 +7,8 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f7f2e7",
-  "theme_color": "#8c5a2b",
+  "background_color": "#f5f8f4",
+  "theme_color": "#2f7d4f",
   "icons": [
     {
       "src": "icons/icon-192.png",
@@ -27,5 +27,5 @@
       "purpose": "maskable"
     }
   ],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }
