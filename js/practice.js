@@ -4,6 +4,8 @@
   var Z = window.ZY, UI = window.ZY_UI;
   var esc = Z.esc, icon = UI.icon;
 
+  var MAX_DRAFTS = 5;   // 最多同时保留的未完成练习份数
+
   var FIELD_DEF = [
     { k: 'nature', name: '药性', short: '药性', rows: 2, ph: '默写药性（四气五味、归经）…' },
     { k: 'effects', name: '功效', short: '功效', rows: 2, ph: '默写功效，可用「，」分隔…' },
@@ -304,7 +306,7 @@
     };
     if (!Array.isArray(Z.store.drafts)) Z.store.drafts = [];
     Z.store.drafts.unshift(rec);
-    if (Z.store.drafts.length > 5) Z.store.drafts.length = 5;   // 最多保留 5 份，防止占满本地存储
+    if (Z.store.drafts.length > MAX_DRAFTS) Z.store.drafts.length = MAX_DRAFTS;
     Z.save(true);
     run = rec;
     UI.go('#/practice/run?id=' + rec.id);
@@ -598,7 +600,8 @@
     saveRun();
     UI.dialog({
       title: '结束练习？',
-      html: '已作答 <b>' + done + '</b> / ' + total + ' 题。<br>退出后会<b>自动保存</b>你已经作答的部分，下次从练习页可以继续。',
+      html: '已作答 <b>' + done + '</b> / ' + total + ' 题。<br>退出后会<b>自动保存</b>你已经作答的部分（最多保存 <b>' + MAX_DRAFTS + '</b> 份）。' +
+        '<br>保存的练习记录都能在「练习」页面找到，随时继续。',
       buttons: [
         { text: '继续练习', value: false },
         { text: '结束并保存', value: true, primary: true }
@@ -648,7 +651,8 @@
     saveRun();
     UI.dialog({
       title: '退出练习？',
-      html: '退出后会<b>自动保存</b>已回答的内容，之后可以继续练习。',
+      html: '退出后会<b>自动保存</b>已回答的内容（最多保存 <b>' + MAX_DRAFTS + '</b> 份）。' +
+        '<br>保存的练习记录都能在「练习」页面找到，随时继续。',
       buttons: [
         { text: '继续练习', value: false },
         { text: '退出', value: true, primary: true }
