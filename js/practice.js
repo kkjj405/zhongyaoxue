@@ -258,22 +258,52 @@
         renderSetup(main, [], { mode: st.mode });
       };
     });
+    function setSel(id, on) {
+      if (on) st.sel[id] = 1; else delete st.sel[id];
+    }
+    // 选中状态变化后，同步：行内复选框、已选总数、底部按钮、所属章的计数与半选态
+    function syncSelUI(id) {
+      var row = main.querySelector('[data-dsel="' + id + '"]');
+      if (row) {
+        var ck0 = row.querySelector('input[type=checkbox]');
+        if (ck0) ck0.checked = !!st.sel[id];
+      }
+      refreshCount();
+      Z.chapters.forEach(function (c, i) {
+        var el = main.querySelector('[data-chap="' + i + '"]');
+        if (!el) return;
+        var list = chapterDrugList(c, st.includeAttach);
+        var has = false;
+        for (var k = 0; k < list.length; k++) { if (list[k].id === id) { has = true; break; } }
+        if (!has) return;
+        var n = 0;
+        list.forEach(function (d) { if (st.sel[d.id]) n++; });
+        var chip = el.querySelector('.chap-hd .chip');
+        if (chip) chip.textContent = n + '/' + list.length;
+        var hc = el.querySelector('.chap-hd input[type=checkbox]');
+        if (hc) {
+          hc.checked = (n === list.length && n > 0);
+          hc.indeterminate = (n > 0 && n < list.length);
+        }
+      });
+    }
+    // ① 直接点复选框：走 change（浏览器已切换 checked）
+    main.querySelectorAll('[data-dsel] input[type=checkbox]').forEach(function (ck) {
+      ck.onchange = function () {
+        var row = ck.closest('[data-dsel]');
+        if (!row) return;
+        var id = row.getAttribute('data-dsel');
+        setSel(id, ck.checked);
+        syncSelUI(id);
+      };
+    });
+    // ② 点药名 / 整行：由这一处统一改状态（不要再让复选框事件冒泡进来重复切换）
     main.querySelectorAll('[data-dsel]').forEach(function (el) {
       el.onclick = function (e) {
-        if (e.target.closest && e.target.closest('.ck')) return;
+        if (e.target.closest && e.target.closest('.ck')) return;  // 复选框已由 ① 处理
         var id = el.getAttribute('data-dsel');
-        if (st.sel[id]) delete st.sel[id]; else st.sel[id] = 1;
-        var ck = el.querySelector('input'); if (ck) ck.checked = !!st.sel[id];
-        refreshCount();
-        var ci = el.closest('[data-chap]');
-        if (ci) {
-          var list = chapterDrugList(Z.chapters[+ci.getAttribute('data-chap')], st.includeAttach);
-          var n = list.filter(function (d) { return st.sel[d.id]; }).length;
-          var chip = ci.querySelector('.chap-hd .chip');
-          if (chip) chip.textContent = n + '/' + list.length;
-          var hc = ci.querySelector('.chap-hd input[type=checkbox]');
-          if (hc) { hc.checked = n === list.length && n > 0; hc.indeterminate = n > 0 && n < list.length; }
-        }
+        setSel(id, !st.sel[id]);
+        syncSelUI(id);
       };
     });
     document.getElementById('btn-start').onclick = function () {
